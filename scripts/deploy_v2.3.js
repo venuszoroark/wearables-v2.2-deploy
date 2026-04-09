@@ -15,17 +15,10 @@ async function main() {
   console.log("Balance:", ethers.formatEther(await ethers.provider.getBalance(deployer.address)), "ETH");
 
   console.log("\n📦 Deploying AlienzoneWearables V2.3...");
-  // Contract name matches the `contract AlienzoneWearables` declaration in the .sol file
   const Factory = await ethers.getContractFactory("contracts/AlienzoneWearablesV2.3.sol:AlienzoneWearables");
-  const contract = await Factory.deploy(OWNER);
+  const contract = await Factory.deploy(OWNER, OPERATOR, WEARABLE_SIGNER, ZONE_TOKEN, PROTOCOL_FEE_DEST);
   await contract.waitForDeployment();
   const address = await contract.getAddress();
-  console.log("Contract deployed to:", address);
-
-  console.log("\n⚙️  Initializing...");
-  const tx = await contract.initialize(OPERATOR, WEARABLE_SIGNER, ZONE_TOKEN, PROTOCOL_FEE_DEST);
-  await tx.wait();
-  console.log("Initialized ✅");
 
   console.log("\n══════════════════════════════════════════");
   console.log("✅ AlienzoneWearables V2.3 DEPLOYED");
@@ -33,7 +26,7 @@ async function main() {
   console.log("══════════════════════════════════════════");
   console.log("📝 Next steps:");
   console.log("  1. WEARABLES_CONTRACT_ADDRESS =", address);
-  console.log("  2. WEARABLES_CONTRACT_DEPLOY_BLOCK = <run: cast block latest --rpc-url https://arb1.arbitrum.io/rpc>");
+  console.log("  2. WEARABLES_CONTRACT_DEPLOY_BLOCK = <current block>");
   console.log("  3. Add both V2.2 subjects to WEARABLES_EXCLUDED_SUBJECTS");
   console.log("  4. Recreate wearables via admin panel");
   console.log("  5. NEXT_PUBLIC_WEARABLES_CONTRACT_ADDRESS =", address);
