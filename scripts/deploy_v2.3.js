@@ -16,7 +16,7 @@ async function main() {
 
   console.log("\n📦 Deploying AlienzoneWearables V2.3...");
   // Contract name matches the `contract AlienzoneWearables` declaration in the .sol file
-  const Factory = await ethers.getContractFactory("AlienzoneWearables");
+  const Factory = await ethers.getContractFactory("contracts/AlienzoneWearablesV2.3.sol:AlienzoneWearables");
   const contract = await Factory.deploy(OWNER);
   await contract.waitForDeployment();
   const address = await contract.getAddress();
