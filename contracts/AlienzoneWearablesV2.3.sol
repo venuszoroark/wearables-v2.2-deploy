@@ -2,7 +2,6 @@
 pragma solidity ^0.8.26;
 
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts/utils/Context.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -19,6 +18,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 //   - Last token (20/20) costs ~4760 ZONE for Epic (integral from 19 to 20)
 //   - curveFactor is IGNORED in price computation (kept in struct for ABI compatibility)
 //   - getSpotPrice() added: returns marginal price P(supply) at current supply level
+//   - Removed Initializable/proxy pattern — constructor handles init (5 args)
 //
 // Price formula (quadratic integral, safe 1e9 fixed-point to avoid overflow):
 //   ns = supply × 1e9 / totalSupply
@@ -69,7 +69,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
  *   Epic:       supply=20,  curve=100(ignored), init=100,   ceil=5000,  floor=99
  *   Legendary:  supply=10,  curve=100(ignored), init=200,   ceil=10000, floor=199
  */
-contract AlienzoneWearables is Initializable, Ownable, ReentrancyGuard {
+contract AlienzoneWearables is Ownable, ReentrancyGuard {
     using ECDSA for bytes32;
     using SafeERC20 for IERC20;
 
@@ -177,16 +177,17 @@ contract AlienzoneWearables is Initializable, Ownable, ReentrancyGuard {
     // userAddress => nonce
     mapping(address => uint256) public nonces;
 
-    /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(address Owner) Ownable(Owner) {
-        _disableInitializers();
-    }
-
-    function initialize(address _wearableOperator, address _signer, address _zoneToken, address _protocolFeeDestination) public initializer {
-        protocolFeeDestination = _protocolFeeDestination;
+    constructor(
+        address _owner,
+        address _operator,
+        address _signer,
+        address _zoneToken,
+        address _feeDestination
+    ) Ownable(_owner) {
+        protocolFeeDestination = _feeDestination;
         protocolFeeBps = PROTOCOL_FEE_BPS_DEFAULT;
         creatorFeeBps = CREATOR_FEE_BPS_DEFAULT;
-        wearableOperator = _wearableOperator;
+        wearableOperator = _operator;
         wearableSigner = _signer;
         zoneToken = IERC20(_zoneToken);
     }
