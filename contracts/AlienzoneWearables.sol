@@ -2,7 +2,6 @@
 pragma solidity ^0.8.26;
 
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts/utils/Context.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -10,15 +9,12 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-// Version: V2.2 — Added ceilPriceFactor and floorPriceFactor (April 2026)
+// Version: V2.2
 // Changes from V2.1:
-//   - Added ceilPriceFactor to WearableFactors: caps buy price per unit
-//   - Added floorPriceFactor to WearableFactors: floors sell price per unit
-//   - All price factors (initialPriceFactor, ceilPriceFactor, floorPriceFactor) must be in wei
-//   - supplyFactor and curveFactor remain plain integers (NOT in wei)
-//   - Fixed: admin panel must convert ZONE amounts to wei (parseEther) before calling createWearable
+//   - Added ceilPriceFactor (max buy price per unit in wei)
+//   - Added floorPriceFactor (min sell price per unit in wei)
+//   - Removed Initializable/proxy pattern — constructor handles init
 
-// Errors
     error InvalidFeePercent();
     error InvalidSignature();
     error InvalidOperator();
@@ -42,59 +38,22 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
     error InsufficientAllowance();
     error ZoneTokenNotSet();
 
-/**
- * @title AlienzoneWearables V2.2
- * @author lixingyu.eth <@0xlxy>
- * @dev V2.2: Added ceilPriceFactor (max buy price per unit) and floorPriceFactor (min sell price per unit)
- *
- * Bonding curve parameters:
- *   - supplyFactor: total supply (plain integer, e.g. 160 for Common)
- *   - curveFactor: curve steepness (plain integer, e.g. 100)
- *   - initialPriceFactor: base price per unit in wei (e.g. parseEther("12.5") for Common)
- *   - ceilPriceFactor: max buy price per unit in wei (e.g. parseEther("625") for Common)
- *   - floorPriceFactor: min sell price per unit in wei (e.g. parseEther("11.5") for Common)
- *
- * Rarity presets (all price values must be passed in wei):
- *   Common:     supply=160, curve=100, init=12.5,  ceil=625,   floor=11.5
- *   Uncommon:   supply=80,  curve=100, init=25,    ceil=1250,  floor=24
- *   Rare:       supply=40,  curve=100, init=50,    ceil=2500,  floor=49
- *   Epic:       supply=20,  curve=100, init=100,   ceil=5000,  floor=99
- *   Legendary:  supply=10,  curve=100, init=200,   ceil=10000, floor=199
- */
-contract AlienzoneWearables is Initializable, Ownable, ReentrancyGuard {
+contract AlienzoneWearables is Ownable, ReentrancyGuard {
     using ECDSA for bytes32;
     using SafeERC20 for IERC20;
 
-    enum SaleStates {
-        PRIVATE,
-        PUBLIC
-    }
+    enum SaleStates { PRIVATE, PUBLIC }
 
-    // 2.25% in bps
     uint16 private constant CREATOR_FEE_BPS_DEFAULT = 225;
-    // 0.25% in bps
     uint16 private constant PROTOCOL_FEE_BPS_DEFAULT = 25;
-
-    // Max combined fee = 20% (2000 bps)
     uint16 private constant MAX_COMBINED_FEE_BPS = 2000;
-
-    // Base unit of a wearable. 1000 fractional shares = 1 full wearable
     uint256 private constant BASE_WEARABLE_UNIT = 0.001 ether;
 
-    // ZONE token contract
     IERC20 public zoneToken;
-
-    // Address of the protocol fee destination
     address public protocolFeeDestination;
-
-    // Percentages (in bps)
     uint16 public protocolFeeBps;
     uint16 public creatorFeeBps;
-
-    // Address that signs messages used for creating wearables and private sales
     address public wearableSigner;
-
-    // Address that signs messages used for creating wearables
     address public wearableOperator;
 
     event ProtocolFeeDestinationUpdated(address feeDestination);
@@ -130,11 +89,11 @@ contract AlienzoneWearables is Initializable, Ownable, ReentrancyGuard {
     event WearableTransferred(address indexed from, address indexed to, bytes32 indexed subject, uint256 amount);
 
     struct WearableFactors {
-        uint256 supplyFactor;       // Total supply (plain integer, e.g. 160)
-        uint256 curveFactor;        // Curve steepness (plain integer, e.g. 100)
-        uint256 initialPriceFactor; // Base price per unit in wei (e.g. 12.5 ether)
-        uint256 ceilPriceFactor;    // Max buy price per unit in wei (e.g. 625 ether)
-        uint256 floorPriceFactor;   // Min sell price per unit in wei (e.g. 11.5 ether)
+        uint256 supplyFactor;
+        uint256 curveFactor;
+        uint256 initialPriceFactor;
+        uint256 ceilPriceFactor;
+        uint256 floorPriceFactor;
     }
 
     struct CreateWearableParams {
@@ -142,11 +101,11 @@ contract AlienzoneWearables is Initializable, Ownable, ReentrancyGuard {
         string name;
         string metadata;
         bool isPublic;
-        uint256 supplyFactor;       // Plain integer (e.g. 160)
-        uint256 curveFactor;        // Plain integer (e.g. 100)
-        uint256 initialPriceFactor; // In wei (e.g. parseEther("12.5"))
-        uint256 ceilPriceFactor;    // In wei (e.g. parseEther("625"))
-        uint256 floorPriceFactor;   // In wei (e.g. parseEther("11.5"))
+        uint256 supplyFactor;
+        uint256 curveFactor;
+        uint256 initialPriceFactor;
+        uint256 ceilPriceFactor;
+        uint256 floorPriceFactor;
     }
 
     struct Wearable {
@@ -157,35 +116,25 @@ contract AlienzoneWearables is Initializable, Ownable, ReentrancyGuard {
         SaleStates state;
     }
 
-    // wearablesSubject => Wearable
     mapping(bytes32 => Wearable) public wearables;
-
-    // wearablesSubject => (holder => balance)
     mapping(bytes32 => mapping(address => uint256)) public wearablesBalance;
-
-    // wearablesSubject => supply
     mapping(bytes32 => uint256) public wearablesSupply;
-
-    // userAddress => nonce
     mapping(address => uint256) public nonces;
 
-    /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(address Owner) Ownable(Owner) {
-        _disableInitializers();
-    }
-
-    function initialize(address _wearableOperator, address _signer, address _zoneToken, address _protocolFeeDestination) public initializer {
-        protocolFeeDestination = _protocolFeeDestination;
+    constructor(
+        address _owner,
+        address _operator,
+        address _signer,
+        address _zoneToken,
+        address _feeDestination
+    ) Ownable(_owner) {
+        protocolFeeDestination = _feeDestination;
         protocolFeeBps = PROTOCOL_FEE_BPS_DEFAULT;
         creatorFeeBps = CREATOR_FEE_BPS_DEFAULT;
-        wearableOperator = _wearableOperator;
+        wearableOperator = _operator;
         wearableSigner = _signer;
         zoneToken = IERC20(_zoneToken);
     }
-
-    // =========================================================================
-    //                          Protocol Settings
-    // =========================================================================
 
     function setZoneToken(address _zoneToken) external onlyOwner {
         if (_zoneToken == address(0)) revert TransferToZeroAddress();
@@ -223,53 +172,25 @@ contract AlienzoneWearables is Initializable, Ownable, ReentrancyGuard {
         emit WearableOperatorUpdated(_operator);
     }
 
-    // =========================================================================
-    //                          Create Wearable Logic
-    // =========================================================================
-
-    /// @dev Creates a wearable. operator only.
     function createWearable(CreateWearableParams calldata params) external {
-        {
-            if (msg.sender != wearableOperator) revert InvalidOperator();
-
-            if (params.supplyFactor < 1 || params.supplyFactor > 10000) revert InvalidTotalSupply();
-            if (params.curveFactor < 1 || params.curveFactor > 1000) revert InvalidCurveFactor();
-
-            // All price factors must be in wei (>= 0.001 ether minimum)
-            if (params.initialPriceFactor < 0.001 ether || params.initialPriceFactor > 1_000_000 ether)
-                revert InvalidInitialPriceFactor();
-
-            // ceilPriceFactor must be >= initialPriceFactor (price only goes up)
-            if (params.ceilPriceFactor < params.initialPriceFactor || params.ceilPriceFactor > 100_000_000 ether)
-                revert InvalidCeilPriceFactor();
-
-            // floorPriceFactor must be <= initialPriceFactor and > 0
-            if (params.floorPriceFactor == 0 || params.floorPriceFactor > params.initialPriceFactor)
-                revert InvalidFloorPriceFactor();
-        }
+        if (msg.sender != wearableOperator) revert InvalidOperator();
+        if (params.supplyFactor < 1 || params.supplyFactor > 10000) revert InvalidTotalSupply();
+        if (params.curveFactor < 1 || params.curveFactor > 1000) revert InvalidCurveFactor();
+        if (params.initialPriceFactor < 0.001 ether || params.initialPriceFactor > 1_000_000 ether) revert InvalidInitialPriceFactor();
+        if (params.ceilPriceFactor < params.initialPriceFactor || params.ceilPriceFactor > 100_000_000 ether) revert InvalidCeilPriceFactor();
+        if (params.floorPriceFactor == 0 || params.floorPriceFactor > params.initialPriceFactor) revert InvalidFloorPriceFactor();
 
         bytes32 wearablesSubject = keccak256(abi.encode(params.name, params.metadata));
-
         if (wearables[wearablesSubject].creator != address(0)) revert WearableAlreadyCreated();
 
         SaleStates state = params.isPublic ? SaleStates.PUBLIC : SaleStates.PRIVATE;
-
         WearableFactors memory factors = WearableFactors(
-            params.supplyFactor,
-            params.curveFactor,
-            params.initialPriceFactor,
-            params.ceilPriceFactor,
-            params.floorPriceFactor
+            params.supplyFactor, params.curveFactor, params.initialPriceFactor,
+            params.ceilPriceFactor, params.floorPriceFactor
         );
-
         wearables[wearablesSubject] = Wearable(params.creator, params.name, params.metadata, factors, state);
-
         emit WearableCreated(params.creator, wearablesSubject, params.name, params.metadata, factors, state);
     }
-
-    // =========================================================================
-    //                          Wearables Settings
-    // =========================================================================
 
     function setWearableSalesState(bytes32 wearablesSubject, SaleStates saleState) external {
         if (msg.sender != wearableOperator) revert InvalidOperator();
@@ -285,31 +206,16 @@ contract AlienzoneWearables is Initializable, Ownable, ReentrancyGuard {
         }
     }
 
-    // =========================================================================
-    //                          Trade Wearable Logic
-    // =========================================================================
-
-    function _curve(
-        uint256 x,
-        uint256 totalSupply,
-        uint256 curveFactor,
-        uint256 initialPriceFactor
-    ) internal pure returns (uint256) {
+    function _curve(uint256 x, uint256 totalSupply, uint256 curveFactor, uint256 initialPriceFactor) internal pure returns (uint256) {
         uint256 curvePrice = ((totalSupply * curveFactor * 1e18) / (totalSupply - x)) - (curveFactor * 1e18);
         uint256 basePrice = (initialPriceFactor * x) / 1 ether;
         return curvePrice + basePrice;
     }
 
-    /// @dev Returns the price based on supply and amount, with ceil/floor caps.
     function getPrice(
-        uint256 supply,
-        uint256 amount,
-        uint256 totalSupply,
-        uint256 curveFactor,
-        uint256 initialPriceFactor,
-        uint256 ceilPriceFactor,
-        uint256 floorPriceFactor,
-        bool isBuy
+        uint256 supply, uint256 amount, uint256 totalSupply,
+        uint256 curveFactor, uint256 initialPriceFactor,
+        uint256 ceilPriceFactor, uint256 floorPriceFactor, bool isBuy
     ) public pure returns (uint256) {
         if (isBuy && supply + amount >= totalSupply) revert TotalSupplyExceeded();
         if (!isBuy && supply >= totalSupply) revert TotalSupplyExceeded();
@@ -318,46 +224,24 @@ contract AlienzoneWearables is Initializable, Ownable, ReentrancyGuard {
             - _curve(supply, totalSupply, curveFactor, initialPriceFactor);
 
         if (isBuy && ceilPriceFactor > 0) {
-            // Cap buy price: each unit costs at most ceilPriceFactor
             uint256 maxPrice = (ceilPriceFactor * amount) / 1 ether;
             if (price > maxPrice) price = maxPrice;
         }
-
         if (!isBuy && floorPriceFactor > 0) {
-            // Floor sell price: each unit returns at least floorPriceFactor
             uint256 minPrice = (floorPriceFactor * amount) / 1 ether;
             if (price < minPrice) price = minPrice;
         }
-
         return price;
     }
 
     function getBuyPrice(bytes32 wearablesSubject, uint256 amount) public view returns (uint256) {
         WearableFactors memory f = wearables[wearablesSubject].factors;
-        return getPrice(
-            wearablesSupply[wearablesSubject],
-            amount,
-            f.supplyFactor * 1 ether,
-            f.curveFactor,
-            f.initialPriceFactor,
-            f.ceilPriceFactor,
-            f.floorPriceFactor,
-            true
-        );
+        return getPrice(wearablesSupply[wearablesSubject], amount, f.supplyFactor * 1 ether, f.curveFactor, f.initialPriceFactor, f.ceilPriceFactor, f.floorPriceFactor, true);
     }
 
     function getSellPrice(bytes32 wearablesSubject, uint256 amount) public view returns (uint256) {
         WearableFactors memory f = wearables[wearablesSubject].factors;
-        return getPrice(
-            wearablesSupply[wearablesSubject] - amount,
-            amount,
-            f.supplyFactor * 1 ether,
-            f.curveFactor,
-            f.initialPriceFactor,
-            f.ceilPriceFactor,
-            f.floorPriceFactor,
-            false
-        );
+        return getPrice(wearablesSupply[wearablesSubject] - amount, amount, f.supplyFactor * 1 ether, f.curveFactor, f.initialPriceFactor, f.ceilPriceFactor, f.floorPriceFactor, false);
     }
 
     function getBuyPriceAfterFee(bytes32 wearablesSubject, uint256 amount) external view returns (uint256) {
@@ -378,122 +262,88 @@ contract AlienzoneWearables is Initializable, Ownable, ReentrancyGuard {
         return Math.mulDiv(price, creatorFeeBps, 10_000, roundUp ? Math.Rounding.Ceil : Math.Rounding.Floor);
     }
 
-    function getUserNonce(address user) external view returns (uint256) {
-        return nonces[user];
-    }
+    function getUserNonce(address user) external view returns (uint256) { return nonces[user]; }
 
     function buyWearables(bytes32 wearablesSubject, uint256 amount) external nonReentrant {
-        {
-            if (address(zoneToken) == address(0)) revert ZoneTokenNotSet();
-            if (amount < BASE_WEARABLE_UNIT) revert InsufficientBaseUnit();
-            if (amount % BASE_WEARABLE_UNIT != 0) revert AmountNotMultipleOfBaseUnit();
-            if (wearables[wearablesSubject].creator == address(0)) revert WearableNotCreated();
-            if (wearables[wearablesSubject].state != SaleStates.PUBLIC) revert InvalidSaleState();
-        }
+        if (address(zoneToken) == address(0)) revert ZoneTokenNotSet();
+        if (amount < BASE_WEARABLE_UNIT) revert InsufficientBaseUnit();
+        if (amount % BASE_WEARABLE_UNIT != 0) revert AmountNotMultipleOfBaseUnit();
+        if (wearables[wearablesSubject].creator == address(0)) revert WearableNotCreated();
+        if (wearables[wearablesSubject].state != SaleStates.PUBLIC) revert InvalidSaleState();
         _buyWearables(wearablesSubject, amount, true);
     }
 
     function buyPrivateWearables(bytes32 wearablesSubject, uint256 amount, bytes calldata signature) external nonReentrant {
-        {
-            if (address(zoneToken) == address(0)) revert ZoneTokenNotSet();
-            if (amount < BASE_WEARABLE_UNIT) revert InsufficientBaseUnit();
-            if (amount % BASE_WEARABLE_UNIT != 0) revert AmountNotMultipleOfBaseUnit();
-            if (wearables[wearablesSubject].creator == address(0)) revert WearableNotCreated();
-            if (wearables[wearablesSubject].state != SaleStates.PRIVATE) revert InvalidSaleState();
-
-            uint256 nonce = nonces[msg.sender];
-            bytes32 hashVal = keccak256(abi.encodePacked(block.chainid, address(this), msg.sender, "buy", wearablesSubject, amount, nonce));
-            if (ECDSA.recover(hashVal, signature) != wearableSigner) revert InvalidSignature();
-
-            nonces[msg.sender] += 1;
-            emit NonceUpdated(msg.sender, nonces[msg.sender]);
-        }
+        if (address(zoneToken) == address(0)) revert ZoneTokenNotSet();
+        if (amount < BASE_WEARABLE_UNIT) revert InsufficientBaseUnit();
+        if (amount % BASE_WEARABLE_UNIT != 0) revert AmountNotMultipleOfBaseUnit();
+        if (wearables[wearablesSubject].creator == address(0)) revert WearableNotCreated();
+        if (wearables[wearablesSubject].state != SaleStates.PRIVATE) revert InvalidSaleState();
+        uint256 nonce = nonces[msg.sender];
+        bytes32 hashVal = keccak256(abi.encodePacked(block.chainid, address(this), msg.sender, "buy", wearablesSubject, amount, nonce));
+        if (ECDSA.recover(hashVal, signature) != wearableSigner) revert InvalidSignature();
+        nonces[msg.sender] += 1;
+        emit NonceUpdated(msg.sender, nonces[msg.sender]);
         _buyWearables(wearablesSubject, amount, false);
     }
 
     function _buyWearables(bytes32 wearablesSubject, uint256 amount, bool isPublic) internal {
         uint256 supply = wearablesSupply[wearablesSubject];
         WearableFactors memory f = wearables[wearablesSubject].factors;
-
-        uint256 price = getPrice(
-            supply, amount, f.supplyFactor * 1 ether,
-            f.curveFactor, f.initialPriceFactor, f.ceilPriceFactor, f.floorPriceFactor, true
-        );
-
+        uint256 price = getPrice(supply, amount, f.supplyFactor * 1 ether, f.curveFactor, f.initialPriceFactor, f.ceilPriceFactor, f.floorPriceFactor, true);
         uint256 protocolFee = _getProtocolFee(price, true);
         uint256 creatorFee = _getCreatorFee(price, true);
         uint256 totalCost = price + protocolFee + creatorFee;
-
         if (zoneToken.balanceOf(msg.sender) < totalCost) revert InsufficientPayment();
         if (zoneToken.allowance(msg.sender, address(this)) < totalCost) revert InsufficientAllowance();
-
         address creatorFeeDestination = wearables[wearablesSubject].creator;
         if (protocolFeeDestination == address(0)) revert TransferToZeroAddress();
         if (creatorFeeDestination == address(0)) revert TransferToZeroAddress();
-
         wearablesBalance[wearablesSubject][msg.sender] += amount;
         wearablesSupply[wearablesSubject] = supply + amount;
-
         emit Trade(msg.sender, wearablesSubject, true, isPublic, amount, price, protocolFee, creatorFee, supply + amount);
-
         zoneToken.safeTransferFrom(msg.sender, address(this), totalCost);
         zoneToken.safeTransfer(protocolFeeDestination, protocolFee);
         zoneToken.safeTransfer(creatorFeeDestination, creatorFee);
     }
 
     function sellWearables(bytes32 wearablesSubject, uint256 amount) external nonReentrant {
-        {
-            if (address(zoneToken) == address(0)) revert ZoneTokenNotSet();
-            if (amount < BASE_WEARABLE_UNIT) revert InsufficientBaseUnit();
-            if (amount % BASE_WEARABLE_UNIT != 0) revert AmountNotMultipleOfBaseUnit();
-            if (wearables[wearablesSubject].creator == address(0)) revert WearableNotCreated();
-            if (wearables[wearablesSubject].state != SaleStates.PUBLIC) revert InvalidSaleState();
-        }
+        if (address(zoneToken) == address(0)) revert ZoneTokenNotSet();
+        if (amount < BASE_WEARABLE_UNIT) revert InsufficientBaseUnit();
+        if (amount % BASE_WEARABLE_UNIT != 0) revert AmountNotMultipleOfBaseUnit();
+        if (wearables[wearablesSubject].creator == address(0)) revert WearableNotCreated();
+        if (wearables[wearablesSubject].state != SaleStates.PUBLIC) revert InvalidSaleState();
         _sellWearables(wearablesSubject, amount, true);
     }
 
     function sellPrivateWearables(bytes32 wearablesSubject, uint256 amount, bytes calldata signature) external nonReentrant {
-        {
-            if (address(zoneToken) == address(0)) revert ZoneTokenNotSet();
-            if (amount < BASE_WEARABLE_UNIT) revert InsufficientBaseUnit();
-            if (amount % BASE_WEARABLE_UNIT != 0) revert AmountNotMultipleOfBaseUnit();
-            if (wearables[wearablesSubject].creator == address(0)) revert WearableNotCreated();
-            if (wearables[wearablesSubject].state != SaleStates.PRIVATE) revert InvalidSaleState();
-
-            uint256 nonce = nonces[msg.sender];
-            bytes32 hashVal = keccak256(abi.encodePacked(block.chainid, address(this), msg.sender, "sell", wearablesSubject, amount, nonce));
-            if (ECDSA.recover(hashVal, signature) != wearableSigner) revert InvalidSignature();
-
-            nonces[msg.sender] += 1;
-            emit NonceUpdated(msg.sender, nonces[msg.sender]);
-        }
+        if (address(zoneToken) == address(0)) revert ZoneTokenNotSet();
+        if (amount < BASE_WEARABLE_UNIT) revert InsufficientBaseUnit();
+        if (amount % BASE_WEARABLE_UNIT != 0) revert AmountNotMultipleOfBaseUnit();
+        if (wearables[wearablesSubject].creator == address(0)) revert WearableNotCreated();
+        if (wearables[wearablesSubject].state != SaleStates.PRIVATE) revert InvalidSaleState();
+        uint256 nonce = nonces[msg.sender];
+        bytes32 hashVal = keccak256(abi.encodePacked(block.chainid, address(this), msg.sender, "sell", wearablesSubject, amount, nonce));
+        if (ECDSA.recover(hashVal, signature) != wearableSigner) revert InvalidSignature();
+        nonces[msg.sender] += 1;
+        emit NonceUpdated(msg.sender, nonces[msg.sender]);
         _sellWearables(wearablesSubject, amount, false);
     }
 
     function _sellWearables(bytes32 wearablesSubject, uint256 amount, bool isPublic) internal {
         uint256 supply = wearablesSupply[wearablesSubject];
         WearableFactors memory f = wearables[wearablesSubject].factors;
-
-        uint256 price = getPrice(
-            supply - amount, amount, f.supplyFactor * 1 ether,
-            f.curveFactor, f.initialPriceFactor, f.ceilPriceFactor, f.floorPriceFactor, false
-        );
-
+        uint256 price = getPrice(supply - amount, amount, f.supplyFactor * 1 ether, f.curveFactor, f.initialPriceFactor, f.ceilPriceFactor, f.floorPriceFactor, false);
         uint256 protocolFee = _getProtocolFee(price, false);
         uint256 creatorFee = _getCreatorFee(price, false);
-
         if (wearablesBalance[wearablesSubject][msg.sender] < amount) revert InsufficientHoldings();
         if (zoneToken.balanceOf(address(this)) < price - protocolFee - creatorFee) revert InsufficientPayment();
-
         address creatorFeeDestination = wearables[wearablesSubject].creator;
         if (protocolFeeDestination == address(0)) revert TransferToZeroAddress();
         if (creatorFeeDestination == address(0)) revert TransferToZeroAddress();
-
         wearablesBalance[wearablesSubject][msg.sender] -= amount;
         wearablesSupply[wearablesSubject] = supply - amount;
-
         emit Trade(msg.sender, wearablesSubject, false, isPublic, amount, price, protocolFee, creatorFee, supply - amount);
-
         zoneToken.safeTransfer(msg.sender, price - protocolFee - creatorFee);
         zoneToken.safeTransfer(protocolFeeDestination, protocolFee);
         zoneToken.safeTransfer(creatorFeeDestination, creatorFee);
@@ -505,10 +355,8 @@ contract AlienzoneWearables is Initializable, Ownable, ReentrancyGuard {
         if (amount % BASE_WEARABLE_UNIT != 0) revert AmountNotMultipleOfBaseUnit();
         if (_msgSender() != from) revert IncorrectSender();
         if (wearablesBalance[wearablesSubject][from] < amount) revert InsufficientHoldings();
-
         wearablesBalance[wearablesSubject][from] -= amount;
         wearablesBalance[wearablesSubject][to] += amount;
-
         emit WearableTransferred(from, to, wearablesSubject, amount);
     }
 
