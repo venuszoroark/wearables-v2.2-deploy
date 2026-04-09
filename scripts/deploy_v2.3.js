@@ -7,6 +7,7 @@ const PROTOCOL_FEE_DEST = "0xD113e4395138dB9619a5D2Ddb23B1314Dd722cb8";
 const WEARABLE_SIGNER   = process.env.WEARABLE_SIGNER_ADDRESS;
 
 if (!WEARABLE_SIGNER) { console.error("❌ Missing WEARABLE_SIGNER_ADDRESS"); process.exit(1); }
+if (!process.env.DEPLOYER_PRIVATE_KEY) { console.error("❌ Missing DEPLOYER_PRIVATE_KEY"); process.exit(1); }
 
 async function main() {
   const [deployer] = await ethers.getSigners();
@@ -14,7 +15,8 @@ async function main() {
   console.log("Balance:", ethers.formatEther(await ethers.provider.getBalance(deployer.address)), "ETH");
 
   console.log("\n📦 Deploying AlienzoneWearables V2.3...");
-  const Factory = await ethers.getContractFactory("AlienzoneWearablesV2.3");
+  // Contract name matches the `contract AlienzoneWearables` declaration in the .sol file
+  const Factory = await ethers.getContractFactory("AlienzoneWearables");
   const contract = await Factory.deploy(OWNER);
   await contract.waitForDeployment();
   const address = await contract.getAddress();
@@ -30,11 +32,11 @@ async function main() {
   console.log("Address:", address);
   console.log("══════════════════════════════════════════");
   console.log("📝 Next steps:");
-  console.log("  1. Update backend: WEARABLES_CONTRACT_ADDRESS =", address);
-  console.log("  2. Update backend: WEARABLES_CONTRACT_DEPLOY_BLOCK = <block number>");
-  console.log("  3. Update backend: WEARABLES_EXCLUDED_SUBJECTS = (add both V2.2 subjects)");
-  console.log("  4. Recreate wearables on new contract via admin panel");
-  console.log("  5. Update frontend: NEXT_PUBLIC_WEARABLES_CONTRACT_ADDRESS =", address);
+  console.log("  1. WEARABLES_CONTRACT_ADDRESS =", address);
+  console.log("  2. WEARABLES_CONTRACT_DEPLOY_BLOCK = <run: cast block latest --rpc-url https://arb1.arbitrum.io/rpc>");
+  console.log("  3. Add both V2.2 subjects to WEARABLES_EXCLUDED_SUBJECTS");
+  console.log("  4. Recreate wearables via admin panel");
+  console.log("  5. NEXT_PUBLIC_WEARABLES_CONTRACT_ADDRESS =", address);
 }
 
 main().catch(e => { console.error(e); process.exit(1); });
