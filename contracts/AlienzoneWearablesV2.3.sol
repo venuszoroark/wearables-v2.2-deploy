@@ -310,14 +310,14 @@ contract AlienzoneWearables is Initializable, Ownable, ReentrancyGuard {
      * Uses 1e9 fixed-point normalization (ns = supply×1e9/S, na = amount×1e9/S)
      * to keep all intermediates within uint256 bounds.
      *
-     * @param supply      Current supply in wei
-     * @param amount      Amount to buy/sell in wei
-     * @param totalSupply Max supply in wei (supplyFactor × 1 ether)
-     * @param             curveFactor — IGNORED, kept for ABI compatibility
-     * @param initialPriceFactor  Price at supply=0 in wei
-     * @param ceilPriceFactor     Asymptotic max price in wei
-     * @param floorPriceFactor    Min sell price in wei
-     * @param isBuy       True for buy, false for sell
+     * @param supply             Current supply in wei
+     * @param amount             Amount to buy/sell in wei
+     * @param totalSupply        Max supply in wei (supplyFactor × 1 ether)
+     * @param initialPriceFactor Price at supply=0 in wei
+     * @param ceilPriceFactor    Asymptotic max price in wei
+     * @param floorPriceFactor   Min sell price in wei
+     * @param isBuy              True for buy, false for sell
+     * Note: curveFactor param (position 4) is ignored — kept unnamed for ABI compatibility
      */
     function getPrice(
         uint256 supply,
