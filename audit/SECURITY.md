@@ -32,9 +32,13 @@
 
 ## Mitigations in production
 
-- **Owner** will be migrated to Gnosis Safe multisig 2/3 (eliminates "owner key leak" vector)
-- **Signer** (`wearableSigner`) key stored as encrypted keystore, rotation quarterly
-- Emergency procedure in case of exploit: `setProtocolFeeBps(2000)` + `setCreatorFeeBps(0)` makes trades economically unviable
+- ✅ **Owner migrated to Gnosis Safe 2/3** le 17/04/2026 — « owner key leak » vector eliminated
+  - Safe address: `0x6d3554127A699C8B8d433dAc37934c5CD8969FD0` (Arbitrum One, Safe 1.4.1)
+  - Threshold: 2/3 owners
+  - Tx `transferOwnership`: [`0x8f7bc2f042355682a0460aa73bbe5cb39628371c199bc13a4b9e720fa927a5db`](https://arbiscan.io/tx/0x8f7bc2f042355682a0460aa73bbe5cb39628371c199bc13a4b9e720fa927a5db)
+  - Ownable simple (single-step) — ownership transferred immediately at tx confirmation
+- **Signer** (`wearableSigner`) key stored as encrypted keystore, rotation quarterly — EOA `0xD113…2cb8` (unchanged, backend signs mints/trades)
+- Emergency procedure in case of exploit: `setProtocolFeeBps(2000)` + `setCreatorFeeBps(0)` makes trades economically unviable (via Safe tx)
 
 ## Reproduce the audit
 
